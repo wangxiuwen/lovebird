@@ -8,6 +8,10 @@ import random
 from datetime import datetime
 from openai import OpenAI  # 使用 OpenAI 包兼容阿里 LLM
 from config import ConfigLoader
+from pydub import AudioSegment
+from scipy.io.wavfile import read
+import sounddevice as sd
+import numpy as np
 
 cfg = ConfigLoader().config
 
@@ -16,7 +20,6 @@ BASE_DIR = "./"
 WORD_LIST_FILE = os.path.join(BASE_DIR, "word_list.txt")  # 单词列表文件
 OUTPUT_AUDIO_FILE_EN = os.path.join(BASE_DIR, "word_audio_en.mp3")  # 英文音频文件
 OUTPUT_AUDIO_FILE_CN = os.path.join(BASE_DIR, "word_audio_cn.mp3")  # 中文音频文件
-OUTPUT_AUDIO_FILE = os.path.join(BASE_DIR, "word_audio.mp3")  # 最终合并音频文件
 
 # 语音设置
 VOICE_EN = "en-US-JennyNeural"  # 英文女声
@@ -137,19 +140,24 @@ async def generate_audio(text, voice, rate, output_file):
         print(f"生成音频失败：{e}")
         return False
 
-# 合并音频文件
-def merge_audio_files(en_file, cn_file, output_file):
-    if os.path.exists(en_file) and os.path.exists(cn_file):
-        os.system(f"ffmpeg -i {en_file} -i {cn_file} -filter_complex '[0:a][1:a]concat=n=2:v=0:a=1[outa]' -map '[outa]' {output_file} -y")
-    else:
-        print("音频文件缺失，无法合并")
-
-# 播放音频
+# 播放音频 (使用 sounddevice 和 numpy)
 def play_audio(file_path):
-    if os.path.exists(file_path):
-        os.system(f"ffplay -autoexit -nodisp -hide_banner -loglevel quiet '{file_path}'")
-    else:
+    if not os.path.exists(file_path):
         print(f"音频文件未找到：{file_path}")
+        return
+
+    # 将 MP3 文件转换为 WAV 格式
+    wav_file = file_path.replace(".mp3", ".wav")
+    audio = AudioSegment.from_file(file_path, format="mp3")
+    audio.export(wav_file, format="wav")
+
+    # 使用 sounddevice 播放 WAV 文件
+    sample_rate, data = read(wav_file)
+    sd.play(data, sample_rate)
+    sd.wait()
+
+    # 删除临时 WAV 文件
+    os.remove(wav_file)
 
 # 主函数
 async def main():
@@ -183,11 +191,12 @@ async def main():
         print("生成中文音频...")
         await generate_audio(full_chinese_text, VOICE_CN, SPEECH_RATE_CN, OUTPUT_AUDIO_FILE_CN)
 
-        print("合并中英文音频...")
-        merge_audio_files(OUTPUT_AUDIO_FILE_EN, OUTPUT_AUDIO_FILE_CN, OUTPUT_AUDIO_FILE)
+        print("播放英文音频...")
+        play_audio(OUTPUT_AUDIO_FILE_EN)
 
-        print("播放完整的混合内容...")
-        play_audio(OUTPUT_AUDIO_FILE)
+        print("播放中文音频...")
+        play_audio(OUTPUT_AUDIO_FILE_CN)
+
         time.sleep(1)
 
     print("\n🎉 所有单词播放完毕！")
